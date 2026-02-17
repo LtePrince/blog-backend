@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"blog-backend/internal/blog/repository"
+	"blog-backend/internal/blog/schema"
 )
 
 // BlogService contains the business logic for blog operations.
@@ -138,4 +140,128 @@ func (s *BlogService) GetBlog(
 		return nil, err
 	}
 	return &GetBlogResponse{Item: detail}, nil
+}
+
+// ──────────────────────────────────────────────
+//  Create blog (CLI uploads meta.yaml content)
+// ──────────────────────────────────────────────
+
+// CreateBlogRequest is the JSON body sent by the CLI tool.
+type CreateBlogRequest struct {
+	Path    string `json:"path"    binding:"required"` // relative dir within repo, e.g. "my-first-post"
+	Title   string `json:"title"   binding:"required"`
+	Summary string `json:"summary"`
+	Date    string `json:"date"    binding:"required"`
+	Tags    string `json:"tags"`   // comma-separated
+	Cover   string `json:"cover"`
+	Author  string `json:"author"`
+}
+
+// CreateBlogResponse returns the created blog's ID.
+type CreateBlogResponse struct {
+	ID int64 `json:"id"`
+}
+
+// CreateBlog creates a new blog record from CLI-submitted metadata.
+func (s *BlogService) CreateBlog(
+	ctx context.Context,
+	req *CreateBlogRequest,
+) (*CreateBlogResponse, error) {
+	blog := &schema.Blog{
+		Title:   strings.TrimSpace(req.Title),
+		Summary: strings.TrimSpace(req.Summary),
+		Path:    strings.TrimSpace(req.Path),
+		Date:    strings.TrimSpace(req.Date),
+		Tags:    strings.TrimSpace(req.Tags),
+		Cover:   strings.TrimSpace(req.Cover),
+		Author:  strings.TrimSpace(req.Author),
+	}
+
+	if err := s.repo.CreateBlog(ctx, blog); err != nil {
+		return nil, err
+	}
+
+	return &CreateBlogResponse{ID: blog.ID}, nil
+}
+
+// ──────────────────────────────────────────────
+//  Update blog metadata
+// ──────────────────────────────────────────────
+
+// UpdateBlogRequest carries the ID in URI and updated fields in JSON body.
+type UpdateBlogRequest struct {
+	ID      int64  `uri:"id"      binding:"required"`
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+	Date    string `json:"date"`
+	Tags    string `json:"tags"`
+	Cover   string `json:"cover"`
+	Author  string `json:"author"`
+	Path    string `json:"path"`
+}
+
+// UpdateBlogResponse is an empty success response.
+type UpdateBlogResponse struct{}
+
+// UpdateBlog updates the metadata of an existing blog.
+func (s *BlogService) UpdateBlog(
+	ctx context.Context,
+	req *UpdateBlogRequest,
+) (*UpdateBlogResponse, error) {
+	updates := make(map[string]interface{})
+
+	if req.Title != "" {
+		updates["title"] = strings.TrimSpace(req.Title)
+	}
+	if req.Summary != "" {
+		updates["summary"] = strings.TrimSpace(req.Summary)
+	}
+	if req.Date != "" {
+		updates["date"] = strings.TrimSpace(req.Date)
+	}
+	if req.Tags != "" {
+		updates["tags"] = strings.TrimSpace(req.Tags)
+	}
+	if req.Cover != "" {
+		updates["cover"] = strings.TrimSpace(req.Cover)
+	}
+	if req.Author != "" {
+		updates["author"] = strings.TrimSpace(req.Author)
+	}
+	if req.Path != "" {
+		updates["path"] = strings.TrimSpace(req.Path)
+	}
+
+	if len(updates) == 0 {
+		return &UpdateBlogResponse{}, nil
+	}
+
+	if err := s.repo.UpdateBlog(ctx, req.ID, updates); err != nil {
+		return nil, err
+	}
+
+	return &UpdateBlogResponse{}, nil
+}
+
+// ──────────────────────────────────────────────
+//  Delete blog
+// ──────────────────────────────────────────────
+
+// DeleteBlogRequest carries the blog ID.
+type DeleteBlogRequest struct {
+	ID int64 `uri:"id" binding:"required"`
+}
+
+// DeleteBlogResponse is an empty success response.
+type DeleteBlogResponse struct{}
+
+// DeleteBlog removes a blog record.
+func (s *BlogService) DeleteBlog(
+	ctx context.Context,
+	req *DeleteBlogRequest,
+) (*DeleteBlogResponse, error) {
+	if err := s.repo.DeleteBlog(ctx, req.ID); err != nil {
+		return nil, err
+	}
+	return &DeleteBlogResponse{}, nil
 }

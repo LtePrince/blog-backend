@@ -7,14 +7,21 @@ import (
 )
 
 // IBlogRepository defines the data-access interface for blog posts.
-// Every method accepts context for cancellation / timeout propagation.
 type IBlogRepository interface {
-	// ListBlogs returns a page of blog summaries (without content body).
-	// limit/offset implement pagination; searchParam carries optional filters & ordering.
+	// ListBlogs returns a page of blog summaries.
 	ListBlogs(ctx context.Context, limit, offset int, params ...SearchParam) ([]BlogItem, int64, error)
 
-	// GetBlogByID returns the full blog (including content) for a single ID.
+	// GetBlogByID returns the full blog (content read from disk).
 	GetBlogByID(ctx context.Context, id int64) (*BlogDetail, error)
+
+	// CreateBlog inserts a new blog record.
+	CreateBlog(ctx context.Context, blog *schema.Blog) error
+
+	// UpdateBlog updates an existing blog's metadata.
+	UpdateBlog(ctx context.Context, id int64, updates map[string]interface{}) error
+
+	// DeleteBlog removes a blog record.
+	DeleteBlog(ctx context.Context, id int64) error
 
 	// AutoMigrate ensures the table schema is up-to-date.
 	AutoMigrate() error
@@ -51,7 +58,7 @@ type BlogItem struct {
 // BlogDetail is the full projection returned by detail queries.
 type BlogDetail struct {
 	BlogItem
-	Content string `json:"text"` // "text" keeps backward compat with old frontend key
+	Content string `json:"text"` // Markdown body read from filesystem
 }
 
 // ToBlogItem converts a schema.Blog to a BlogItem (summary only).
@@ -64,13 +71,5 @@ func ToBlogItem(b *schema.Blog) BlogItem {
 		Tags:    b.Tags,
 		Cover:   b.Cover,
 		Author:  b.Author,
-	}
-}
-
-// ToBlogDetail converts a schema.Blog to a BlogDetail (full).
-func ToBlogDetail(b *schema.Blog) *BlogDetail {
-	return &BlogDetail{
-		BlogItem: ToBlogItem(b),
-		Content:  b.Content,
 	}
 }

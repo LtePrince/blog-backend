@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
 	Database DatabaseConfig `mapstructure:"database"`
+	Content  ContentConfig  `mapstructure:"content"`
 	App      AppConfig      `mapstructure:"app"`
 }
 
@@ -25,6 +26,11 @@ type ServerConfig struct {
 type DatabaseConfig struct {
 	Driver string `mapstructure:"driver"` // sqlite, postgres, mysql
 	DSN    string `mapstructure:"dsn"`
+}
+
+// ContentConfig holds paths to the blog content repository.
+type ContentConfig struct {
+	RepoDir string `mapstructure:"repo_dir"` // absolute path to blog repo root
 }
 
 // AppConfig holds application-level settings.
@@ -75,6 +81,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("database.driver", "sqlite")
 	v.SetDefault("database.dsn", "blog.db")
+
+	v.SetDefault("content.repo_dir", "./blogs")
 
 	v.SetDefault("app.name", "blog-backend")
 	v.SetDefault("app.environment", "dev")

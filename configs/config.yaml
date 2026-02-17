@@ -6,6 +6,11 @@ database:
   driver: "sqlite"
   dsn: "blog.db"
 
+content:
+  # Absolute path to the blog content repository root.
+  # Override via env: BLOG_CONTENT_REPO_DIR
+  repo_dir: "/home/adolph/workspace/Personal-website/blogs"
+
 app:
   name: "blog-backend"
   environment: "dev"

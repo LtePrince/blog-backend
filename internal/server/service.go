@@ -93,3 +93,13 @@ func handleQuery[Req any, Resp any](fn ServiceFunc[Req, Resp]) gin.HandlerFunc {
 func handleURI[Req any, Resp any](fn ServiceFunc[Req, Resp]) gin.HandlerFunc {
 	return handleGenericWithBinding(fn, bindURI)
 }
+
+// handleJSON binds request from JSON body.
+func handleJSON[Req any, Resp any](fn ServiceFunc[Req, Resp]) gin.HandlerFunc {
+	return handleGenericWithBinding(fn, bindJSON)
+}
+
+// handleAll binds from URI + query + JSON body (for PUT with path params).
+func handleAll[Req any, Resp any](fn ServiceFunc[Req, Resp]) gin.HandlerFunc {
+	return handleGenericWithBinding(fn, bindAll)
+}

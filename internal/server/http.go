@@ -51,7 +51,7 @@ func NewHttpServer(
 		srv:         srv,
 		blogService: blogService,
 	}
-	h.registerRoutes()
+	h.registerRoutes(cfg)
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -88,18 +88,27 @@ func corsMiddleware() gin.HandlerFunc {
 }
 
 // registerRoutes sets up all HTTP routes.
-func (h *HttpServer) registerRoutes() {
+func (h *HttpServer) registerRoutes(cfg *config.Config) {
 	h.engine.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, Response{Code: "OK", Message: "healthy"})
 	})
+
+	// Serve static assets from the blog content repo.
+	h.engine.Static("/static", cfg.Content.RepoDir)
 
 	api := h.engine.Group("/api/v1")
 	{
 		blogs := api.Group("/blogs")
 		{
+			// Read endpoints (frontend)
 			blogs.GET("", handleQuery(h.blogService.ListBlogs))
 			blogs.GET("/recent", handleQuery(h.blogService.RecentBlogs))
 			blogs.GET("/:id", handleURI(h.blogService.GetBlog))
+
+			// Write endpoints (CLI tool)
+			blogs.POST("", handleJSON(h.blogService.CreateBlog))
+			blogs.PUT("/:id", handleAll(h.blogService.UpdateBlog))
+			blogs.DELETE("/:id", handleURI(h.blogService.DeleteBlog))
 		}
 	}
 }
