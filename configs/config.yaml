@@ -1,0 +1,11 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+database:
+  driver: "sqlite"
+  dsn: "blog.db"
+
+app:
+  name: "blog-backend"
+  environment: "dev"

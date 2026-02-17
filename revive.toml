@@ -1,0 +1,64 @@
+# Revive configuration for blog-backend
+# https://github.com/mgechev/revive
+
+# Global settings
+ignoreGeneratedHeader = false
+severity = "warning"
+confidence = 0.8
+errorCode = 1
+warningCode = 0
+
+# Core rules - most important for code quality
+[rule.blank-imports]
+[rule.context-as-argument]
+[rule.dot-imports]
+[rule.error-return]
+[rule.error-strings]
+[rule.error-naming]
+[rule.exported]
+[rule.if-return]
+[rule.increment-decrement]
+[rule.var-naming]
+[rule.var-declaration]
+# [rule.package-comments]  # Disabled - only one file per package needs package comment
+[rule.range]
+[rule.receiver-naming]
+[rule.time-naming]
+[rule.unexported-return]
+[rule.indent-error-flow]
+[rule.errorf]
+[rule.empty-block]
+[rule.superfluous-else]
+[rule.unreachable-code]
+[rule.redefines-builtin-id]
+
+# Function complexity rules
+[rule.function-length]
+  arguments = [80, 100]
+[rule.cyclomatic]
+  arguments = [25]
+
+# Performance and best practices
+[rule.range-val-in-closure]
+[rule.waitgroup-by-value]
+[rule.atomic]
+[rule.empty-lines]
+[rule.flag-parameter]
+[rule.struct-tag]
+
+# Security - blacklist weak crypto
+[rule.imports-blacklist]
+  arguments = ["crypto/md5", "crypto/sha1"]
+
+# Disabled rules that may be too strict
+# [rule.line-length-limit]
+#   arguments = [120]
+# [rule.cognitive-complexity]
+#   arguments = [15]
+# [rule.function-result-limit]
+#   arguments = [3]
+# [rule.argument-limit]
+#   arguments = [5]
+# [rule.unused-parameter]
+# [rule.modifies-parameter]
+# [rule.confusing-naming]

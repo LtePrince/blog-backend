@@ -1,0 +1,87 @@
+# Taskfile for blog-backend project
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  MAIN_PACKAGE: ./...
+  COVERAGE_FILE: coverage.out
+  COVERAGE_HTML: coverage.html
+  PROJECT_NAME: 'blog-backend'
+  BUILD_TIME:
+    sh: date -u +"%Y-%m-%dT%H:%M:%SZ"
+  GIT_BRANCH:
+    sh: git branch --show-current 2>/dev/null || echo "unknown"
+  GIT_COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo "unknown"
+  GO_VERSION:
+    sh: go version | awk '{print $3}'
+  FLAGS: -a -tags netgo -trimpath -ldflags '-s -w -X main.GitCommit={{.GIT_COMMIT}} -X main.GitBranch={{.GIT_BRANCH}} -X main.BuildTime={{.BUILD_TIME}} -X main.GoVersion={{.GO_VERSION}}'
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  setup:
+    desc: Install tools & download dependencies (run once)
+    cmds:
+      - go install github.com/mgechev/revive@latest
+      - go mod download
+      - go mod tidy
+      - echo "✅ Development environment ready!"
+
+  run:
+    desc: Run the server directly (no build step)
+    cmds:
+      - go run ./cmd/main.go serve -c configs/config.yaml
+
+  build:
+    desc: Production build (Linux amd64, stripped)
+    cmds:
+      - GOOS=linux GOARCH=amd64 go build -o bin/{{.PROJECT_NAME}} {{.FLAGS}} ./cmd/main.go
+
+  lint:
+    desc: Format + vet + revive
+    cmds:
+      - go fmt {{.MAIN_PACKAGE}}
+      - go vet {{.MAIN_PACKAGE}}
+      - |
+        SOURCE_FILES=$(find . -name "*.go" -not -name "*_test.go" -not -path "./vendor/*" | tr '\n' ' ')
+        if [ -n "$SOURCE_FILES" ]; then
+          revive -config revive.toml -formatter friendly $SOURCE_FILES
+        fi
+
+  test:
+    desc: Run tests with race detector
+    cmds:
+      - go test -v -race -timeout 10m {{.MAIN_PACKAGE}}
+
+  test-cover:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -v -race -coverprofile={{.COVERAGE_FILE}} -covermode=atomic -timeout 10m {{.MAIN_PACKAGE}}
+      - go tool cover -func={{.COVERAGE_FILE}}
+      - go tool cover -html={{.COVERAGE_FILE}} -o {{.COVERAGE_HTML}}
+
+  check:
+    desc: Full pre-commit check (lint + test)
+    cmds:
+      - task lint
+      - task test
+
+  clean:
+    desc: Clean build artifacts, DB and coverage files
+    cmds:
+      - go clean
+      - rm -f {{.COVERAGE_FILE}} {{.COVERAGE_HTML}}
+      - rm -f *.db
+      - rm -rf bin/
+
+  dev:
+    desc: Build debug version and run
+    cmds:
+      - go build -o bin/{{.PROJECT_NAME}}-debug ./cmd/main.go
+      - ./bin/{{.PROJECT_NAME}}-debug serve -c configs/config.yaml
