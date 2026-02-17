@@ -152,7 +152,7 @@ type CreateBlogRequest struct {
 	Title   string `json:"title"   binding:"required"`
 	Summary string `json:"summary"`
 	Date    string `json:"date"    binding:"required"`
-	Tags    string `json:"tags"`   // comma-separated
+	Tags    string `json:"tags"` // comma-separated
 	Cover   string `json:"cover"`
 	Author  string `json:"author"`
 }
