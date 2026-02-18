@@ -98,6 +98,9 @@ func (h *HttpServer) registerRoutes(cfg *config.Config) {
 
 	api := h.engine.Group("/api/v1")
 	{
+		// Site statistics
+		api.GET("/stats", handleQuery(h.blogService.Stats))
+
 		blogs := api.Group("/blogs")
 		{
 			// Read endpoints (frontend)

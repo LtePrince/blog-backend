@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"blog-backend/internal/blog/schema"
 
@@ -133,4 +134,36 @@ func (r *blogRepository) DeleteBlog(ctx context.Context, id int64) error {
 		return fmt.Errorf("blog %d not found", id)
 	}
 	return nil
+}
+
+// GetStats returns aggregate site statistics.
+func (r *blogRepository) GetStats(ctx context.Context) (*SiteStats, error) {
+	var postCount int64
+	if err := r.db.WithContext(ctx).Model(&schema.Blog{}).Count(&postCount).Error; err != nil {
+		return nil, fmt.Errorf("count posts: %w", err)
+	}
+
+	// Count unique tags: each blog stores comma-separated tags.
+	var tagValues []string
+	if err := r.db.WithContext(ctx).
+		Model(&schema.Blog{}).
+		Where("tags != ''").
+		Pluck("tags", &tagValues).Error; err != nil {
+		return nil, fmt.Errorf("pluck tags: %w", err)
+	}
+
+	uniqueTagSet := make(map[string]struct{})
+	for _, raw := range tagValues {
+		for _, t := range strings.Split(raw, ",") {
+			tag := strings.TrimSpace(t)
+			if tag != "" {
+				uniqueTagSet[tag] = struct{}{}
+			}
+		}
+	}
+
+	return &SiteStats{
+		PostCount: postCount,
+		TagCount:  int64(len(uniqueTagSet)),
+	}, nil
 }

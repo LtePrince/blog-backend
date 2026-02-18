@@ -265,3 +265,31 @@ func (s *BlogService) DeleteBlog(
 	}
 	return &DeleteBlogResponse{}, nil
 }
+
+// ──────────────────────────────────────────────
+//  Site statistics
+// ──────────────────────────────────────────────
+
+// StatsRequest is empty – no input needed.
+type StatsRequest struct{}
+
+// StatsResponse wraps the site statistics.
+type StatsResponse struct {
+	PostCount int64 `json:"post_count"`
+	TagCount  int64 `json:"tag_count"`
+}
+
+// Stats returns aggregate site statistics.
+func (s *BlogService) Stats(
+	ctx context.Context,
+	_ *StatsRequest,
+) (*StatsResponse, error) {
+	stats, err := s.repo.GetStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &StatsResponse{
+		PostCount: stats.PostCount,
+		TagCount:  stats.TagCount,
+	}, nil
+}

@@ -23,8 +23,17 @@ type IBlogRepository interface {
 	// DeleteBlog removes a blog record.
 	DeleteBlog(ctx context.Context, id int64) error
 
+	// GetStats returns site-wide statistics (total posts, total unique tags).
+	GetStats(ctx context.Context) (*SiteStats, error)
+
 	// AutoMigrate ensures the table schema is up-to-date.
 	AutoMigrate() error
+}
+
+// SiteStats holds aggregate site statistics.
+type SiteStats struct {
+	PostCount int64 `json:"post_count"`
+	TagCount  int64 `json:"tag_count"`
 }
 
 // SearchParam carries optional filter & order options.
