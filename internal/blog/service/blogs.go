@@ -19,7 +19,7 @@ func NewBlogService(repo repository.IBlogRepository) *BlogService {
 }
 
 // ──────────────────────────────────────────────
-//  List blogs (paginated, with optional title filter)
+//  List blogs (paginated, with optional title/tag filter)
 // ──────────────────────────────────────────────
 
 // ListBlogsRequest carries query parameters for listing blogs.
@@ -27,6 +27,7 @@ type ListBlogsRequest struct {
 	PageNo      int    `form:"page_no"`
 	PageSize    int    `form:"page_size"`
 	FilterTitle string `form:"filter_title"`
+	FilterTag   string `form:"filter_tag"`
 	OrderBy     string `form:"order_by" binding:"omitempty,oneof=date title created_at"`
 	Order       string `form:"order"    binding:"omitempty,oneof=asc desc"`
 }
@@ -50,8 +51,11 @@ func (s *BlogService) ListBlogs(
 	}
 
 	var filter *repository.BlogFilter
-	if req.FilterTitle != "" {
-		filter = &repository.BlogFilter{Title: req.FilterTitle}
+	if req.FilterTitle != "" || req.FilterTag != "" {
+		filter = &repository.BlogFilter{
+			Title: req.FilterTitle,
+			Tag:   req.FilterTag,
+		}
 	}
 
 	var order *repository.Order
@@ -148,13 +152,13 @@ func (s *BlogService) GetBlog(
 
 // CreateBlogRequest is the JSON body sent by the CLI tool.
 type CreateBlogRequest struct {
-	Path    string `json:"path"    binding:"required"` // relative dir within repo, e.g. "my-first-post"
-	Title   string `json:"title"   binding:"required"`
-	Summary string `json:"summary"`
-	Date    string `json:"date"    binding:"required"`
-	Tags    string `json:"tags"` // comma-separated
-	Cover   string `json:"cover"`
-	Author  string `json:"author"`
+	Path    string   `json:"path"    binding:"required"` // relative dir within repo, e.g. "my-first-post"
+	Title   string   `json:"title"   binding:"required"`
+	Summary string   `json:"summary"`
+	Date    string   `json:"date"    binding:"required"`
+	Tags    []string `json:"tags"` // tag names
+	Cover   string   `json:"cover"`
+	Author  string   `json:"author"`
 }
 
 // CreateBlogResponse returns the created blog's ID.
@@ -172,12 +176,11 @@ func (s *BlogService) CreateBlog(
 		Summary: strings.TrimSpace(req.Summary),
 		Path:    strings.TrimSpace(req.Path),
 		Date:    strings.TrimSpace(req.Date),
-		Tags:    strings.TrimSpace(req.Tags),
 		Cover:   strings.TrimSpace(req.Cover),
 		Author:  strings.TrimSpace(req.Author),
 	}
 
-	if err := s.repo.CreateBlog(ctx, blog); err != nil {
+	if err := s.repo.CreateBlog(ctx, blog, req.Tags); err != nil {
 		return nil, err
 	}
 
@@ -190,14 +193,14 @@ func (s *BlogService) CreateBlog(
 
 // UpdateBlogRequest carries the ID in URI and updated fields in JSON body.
 type UpdateBlogRequest struct {
-	ID      int64  `uri:"id"      binding:"required"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
-	Date    string `json:"date"`
-	Tags    string `json:"tags"`
-	Cover   string `json:"cover"`
-	Author  string `json:"author"`
-	Path    string `json:"path"`
+	ID      int64     `uri:"id"      binding:"required"`
+	Title   string    `json:"title"`
+	Summary string    `json:"summary"`
+	Date    string    `json:"date"`
+	Tags    *[]string `json:"tags"` // nil = don't change, empty = clear all, non-empty = set
+	Cover   string    `json:"cover"`
+	Author  string    `json:"author"`
+	Path    string    `json:"path"`
 }
 
 // UpdateBlogResponse is an empty success response.
@@ -219,9 +222,6 @@ func (s *BlogService) UpdateBlog(
 	if req.Date != "" {
 		updates["date"] = strings.TrimSpace(req.Date)
 	}
-	if req.Tags != "" {
-		updates["tags"] = strings.TrimSpace(req.Tags)
-	}
 	if req.Cover != "" {
 		updates["cover"] = strings.TrimSpace(req.Cover)
 	}
@@ -232,11 +232,11 @@ func (s *BlogService) UpdateBlog(
 		updates["path"] = strings.TrimSpace(req.Path)
 	}
 
-	if len(updates) == 0 {
+	if len(updates) == 0 && req.Tags == nil {
 		return &UpdateBlogResponse{}, nil
 	}
 
-	if err := s.repo.UpdateBlog(ctx, req.ID, updates); err != nil {
+	if err := s.repo.UpdateBlog(ctx, req.ID, updates, req.Tags); err != nil {
 		return nil, err
 	}
 
@@ -292,4 +292,28 @@ func (s *BlogService) Stats(
 		PostCount: stats.PostCount,
 		TagCount:  stats.TagCount,
 	}, nil
+}
+
+// ──────────────────────────────────────────────
+//  List tags
+// ──────────────────────────────────────────────
+
+// ListTagsRequest is empty — no input needed.
+type ListTagsRequest struct{}
+
+// ListTagsResponse wraps the list of tags.
+type ListTagsResponse struct {
+	Items []repository.TagItem `json:"items"`
+}
+
+// ListTags returns all tags with their associated post counts.
+func (s *BlogService) ListTags(
+	ctx context.Context,
+	_ *ListTagsRequest,
+) (*ListTagsResponse, error) {
+	items, err := s.repo.ListTags(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ListTagsResponse{Items: items}, nil
 }

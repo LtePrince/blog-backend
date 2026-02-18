@@ -101,6 +101,9 @@ func (h *HttpServer) registerRoutes(cfg *config.Config) {
 		// Site statistics
 		api.GET("/stats", handleQuery(h.blogService.Stats))
 
+		// Tags
+		api.GET("/tags", handleQuery(h.blogService.ListTags))
+
 		blogs := api.Group("/blogs")
 		{
 			// Read endpoints (frontend)

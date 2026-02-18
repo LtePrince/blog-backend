@@ -9,7 +9,7 @@ type Blog struct {
 	Summary   string `gorm:"type:text;column:summary" json:"summary"`
 	Path      string `gorm:"type:varchar(500);not null;column:path;uniqueIndex" json:"path"` // relative dir within repo (e.g. "my-first-post")
 	Date      string `gorm:"type:varchar(50);not null;column:date" json:"date"`
-	Tags      string `gorm:"type:varchar(500);column:tags" json:"tags"`   // comma-separated
+	Tags      []Tag  `gorm:"many2many:blog_tags" json:"tags"`             // many-to-many via blog_tags junction table
 	Cover     string `gorm:"type:varchar(500);column:cover" json:"cover"` // relative path or URL
 	Author    string `gorm:"type:varchar(100);column:author" json:"author"`
 	CreatedAt int64  `gorm:"autoCreateTime;column:created_at" json:"created_at"`
