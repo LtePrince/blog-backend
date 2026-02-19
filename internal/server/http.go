@@ -7,8 +7,9 @@ import (
 	"net/http"
 
 	"blog-backend/internal/blog/repository"
-	"blog-backend/internal/blog/service"
+	blogservice "blog-backend/internal/blog/service"
 	"blog-backend/internal/config"
+	systemservice "blog-backend/internal/system/service"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/fx"
@@ -16,16 +17,18 @@ import (
 
 // HttpServer wraps Gin and exposes the blog HTTP API.
 type HttpServer struct {
-	engine      *gin.Engine
-	srv         *http.Server
-	blogService *service.BlogService
+	engine        *gin.Engine
+	srv           *http.Server
+	blogService   *blogservice.BlogService
+	systemService *systemservice.SystemService
 }
 
 // NewHttpServer creates the HTTP server, registers routes, and hooks into fx lifecycle.
 func NewHttpServer(
 	lc fx.Lifecycle,
 	cfg *config.Config,
-	blogService *service.BlogService,
+	blogService *blogservice.BlogService,
+	systemService *systemservice.SystemService,
 	blogRepo repository.IBlogRepository,
 ) *HttpServer {
 	// Auto-migrate blog table on startup.
@@ -47,9 +50,10 @@ func NewHttpServer(
 	}
 
 	h := &HttpServer{
-		engine:      r,
-		srv:         srv,
-		blogService: blogService,
+		engine:        r,
+		srv:           srv,
+		blogService:   blogService,
+		systemService: systemService,
 	}
 	h.registerRoutes(cfg)
 
@@ -103,6 +107,12 @@ func (h *HttpServer) registerRoutes(cfg *config.Config) {
 
 		// Tags
 		api.GET("/tags", handleQuery(h.blogService.ListTags))
+
+		// System Info
+		system := api.Group("/system")
+		{
+			system.GET("/stats", handleQuery(h.systemService.GetSystemStatus))
+		}
 
 		blogs := api.Group("/blogs")
 		{
