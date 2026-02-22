@@ -36,7 +36,7 @@ tasks:
   run:
     desc: Run the server directly (no build step)
     cmds:
-      - go run ./cmd/main.go serve -c configs/config.yaml
+      - go run ./cmd/main.go serve -c configs/config_dev.yaml
 
   build:
     desc: Production build (Linux amd64, stripped)
@@ -84,4 +84,4 @@ tasks:
     desc: Build debug version and run
     cmds:
       - go build -o bin/{{.PROJECT_NAME}}-debug ./cmd/main.go
-      - ./bin/{{.PROJECT_NAME}}-debug serve -c configs/config.yaml
+      - ./bin/{{.PROJECT_NAME}}-debug serve -c configs/config_dev.yaml
