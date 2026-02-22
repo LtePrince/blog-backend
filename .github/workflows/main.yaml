@@ -30,7 +30,7 @@ jobs:
         run: |
           mkdir -p ./dist/configs
           # 交叉编译 Linux 64位版本
-          GOOS=linux GOARCH=amd64 go build -o ./dist/server main.go
+          GOOS=linux GOARCH=amd64 go build -o ./dist/server ./cmd/main.go
 
       - name: Prepare Package
         run: |
