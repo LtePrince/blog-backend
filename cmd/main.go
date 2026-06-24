@@ -8,6 +8,7 @@ import (
 
 	"blog-backend/internal/blog"
 	"blog-backend/internal/config"
+	"blog-backend/internal/moments"
 	"blog-backend/internal/resource"
 	"blog-backend/internal/server"
 	"blog-backend/internal/system"
@@ -41,6 +42,7 @@ var serveCmd = &cobra.Command{
 			resource.Module,
 			blog.Module,
 			system.Module,
+			moments.Module,
 			server.Module,
 			fx.Invoke(func(cfg *config.Config) {
 				log.Println("🐋 Whalefall Blog Server Started")

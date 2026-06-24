@@ -9,6 +9,7 @@ import (
 	"blog-backend/internal/blog/repository"
 	blogservice "blog-backend/internal/blog/service"
 	"blog-backend/internal/config"
+	momentsservice "blog-backend/internal/moments/service"
 	systemservice "blog-backend/internal/system/service"
 
 	"github.com/gin-gonic/gin"
@@ -17,10 +18,11 @@ import (
 
 // HttpServer wraps Gin and exposes the blog HTTP API.
 type HttpServer struct {
-	engine        *gin.Engine
-	srv           *http.Server
-	blogService   *blogservice.BlogService
-	systemService *systemservice.SystemService
+	engine         *gin.Engine
+	srv            *http.Server
+	blogService    *blogservice.BlogService
+	systemService  *systemservice.SystemService
+	momentsService *momentsservice.MomentsService
 }
 
 // NewHttpServer creates the HTTP server, registers routes, and hooks into fx lifecycle.
@@ -29,6 +31,7 @@ func NewHttpServer(
 	cfg *config.Config,
 	blogService *blogservice.BlogService,
 	systemService *systemservice.SystemService,
+	momentsService *momentsservice.MomentsService,
 	blogRepo repository.IBlogRepository,
 ) *HttpServer {
 	// Auto-migrate blog table on startup.
@@ -50,10 +53,11 @@ func NewHttpServer(
 	}
 
 	h := &HttpServer{
-		engine:        r,
-		srv:           srv,
-		blogService:   blogService,
-		systemService: systemService,
+		engine:         r,
+		srv:            srv,
+		blogService:    blogService,
+		systemService:  systemService,
+		momentsService: momentsService,
 	}
 	h.registerRoutes(cfg)
 
@@ -107,6 +111,9 @@ func (h *HttpServer) registerRoutes(cfg *config.Config) {
 
 		// Tags
 		api.GET("/tags", handleQuery(h.blogService.ListTags))
+
+		// Moments (one-line personal timeline)
+		api.GET("/moments", handleQuery(h.momentsService.ListMoments))
 
 		// System Info
 		system := api.Group("/system")
