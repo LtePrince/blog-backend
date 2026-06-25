@@ -37,8 +37,11 @@ func NewMomentsService(cfg *config.Config) *MomentsService {
 	return &MomentsService{repoDir: cfg.Content.RepoDir}
 }
 
-// ListMomentsRequest is empty — no input needed.
-type ListMomentsRequest struct{}
+// ListMomentsRequest carries optional query parameters. A limit <= 0 (or
+// absent) returns all moments; a positive limit caps the result.
+type ListMomentsRequest struct {
+	Limit int `form:"limit"`
+}
 
 // ListMomentsResponse wraps the moments list (newest first).
 type ListMomentsResponse struct {
@@ -50,7 +53,7 @@ type ListMomentsResponse struct {
 // empty list rather than an error.
 func (s *MomentsService) ListMoments(
 	_ context.Context,
-	_ *ListMomentsRequest,
+	req *ListMomentsRequest,
 ) (*ListMomentsResponse, error) {
 	path := filepath.Join(s.repoDir, "moments", "moments.yaml")
 
@@ -71,6 +74,11 @@ func (s *MomentsService) ListMoments(
 	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].Date > items[j].Date
 	})
+
+	// Optional cap — limit <= 0 means "return all".
+	if req.Limit > 0 && len(items) > req.Limit {
+		items = items[:req.Limit]
+	}
 
 	if items == nil {
 		items = []Moment{}
