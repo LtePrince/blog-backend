@@ -282,7 +282,9 @@ func (r *blogRepository) DeleteBlog(ctx context.Context, id int64) error {
 		}
 
 		// 自动删除未被关联的标签
-		if err := tx.Exec(`DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM blog_tags)`).Error; err != nil {
+		if err := tx.Exec(`DELETE FROM tags
+			WHERE id NOT IN (SELECT tag_id FROM blog_tags)
+			  AND id NOT IN (SELECT tag_id FROM column_tags)`).Error; err != nil {
 			return fmt.Errorf("cleanup orphan tags: %w", err)
 		}
 

@@ -8,6 +8,8 @@ import (
 
 	"blog-backend/internal/blog/repository"
 	blogservice "blog-backend/internal/blog/service"
+	columnrepo "blog-backend/internal/column/repository"
+	columnservice "blog-backend/internal/column/service"
 	"blog-backend/internal/config"
 	momentsservice "blog-backend/internal/moments/service"
 	systemservice "blog-backend/internal/system/service"
@@ -23,6 +25,7 @@ type HttpServer struct {
 	blogService    *blogservice.BlogService
 	systemService  *systemservice.SystemService
 	momentsService *momentsservice.MomentsService
+	columnService  *columnservice.ColumnService
 }
 
 // NewHttpServer creates the HTTP server, registers routes, and hooks into fx lifecycle.
@@ -32,11 +35,16 @@ func NewHttpServer(
 	blogService *blogservice.BlogService,
 	systemService *systemservice.SystemService,
 	momentsService *momentsservice.MomentsService,
+	columnService *columnservice.ColumnService,
 	blogRepo repository.IBlogRepository,
+	columnRepo columnrepo.IColumnRepository,
 ) *HttpServer {
-	// Auto-migrate blog table on startup.
+	// Auto-migrate blog & column tables on startup.
 	if err := blogRepo.AutoMigrate(); err != nil {
 		log.Fatalf("auto-migrate failed: %v", err)
+	}
+	if err := columnRepo.AutoMigrate(); err != nil {
+		log.Fatalf("column auto-migrate failed: %v", err)
 	}
 
 	if cfg.App.Environment == "prd" {
@@ -58,6 +66,7 @@ func NewHttpServer(
 		blogService:    blogService,
 		systemService:  systemService,
 		momentsService: momentsService,
+		columnService:  columnService,
 	}
 	h.registerRoutes(cfg)
 
@@ -132,6 +141,20 @@ func (h *HttpServer) registerRoutes(cfg *config.Config) {
 			blogs.POST("", handleJSON(h.blogService.CreateBlog))
 			blogs.PUT("/:id", handleAll(h.blogService.UpdateBlog))
 			blogs.DELETE("/:id", handleURI(h.blogService.DeleteBlog))
+		}
+
+		columns := api.Group("/columns")
+		{
+			// Read endpoints (frontend)
+			columns.GET("", handleQuery(h.columnService.ListColumns))
+			columns.GET("/tags", handleQuery(h.columnService.ListTags))
+			columns.GET("/:slug", handleURI(h.columnService.GetColumn))
+			columns.GET("/:slug/chapters/:chapter", handleURI(h.columnService.GetChapter))
+
+			// Write endpoints (CLI tool)
+			columns.POST("", handleJSON(h.columnService.CreateColumn))
+			columns.PUT("/:slug", handleAll(h.columnService.UpdateColumn))
+			columns.DELETE("/:slug", handleURI(h.columnService.DeleteColumn))
 		}
 	}
 }

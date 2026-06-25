@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"blog-backend/internal/blog"
+	"blog-backend/internal/column"
 	"blog-backend/internal/config"
 	"blog-backend/internal/moments"
 	"blog-backend/internal/resource"
@@ -41,6 +42,7 @@ var serveCmd = &cobra.Command{
 			config.Module,
 			resource.Module,
 			blog.Module,
+			column.Module,
 			system.Module,
 			moments.Module,
 			server.Module,
