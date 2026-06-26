@@ -68,13 +68,15 @@ type SiteStats struct {
 
 // BlogItem is the summary projection returned by list queries.
 type BlogItem struct {
-	ID      int64    `json:"id"`
-	Title   string   `json:"title"`
-	Summary string   `json:"summary"`
-	Date    string   `json:"date"`
-	Tags    []string `json:"tags"`
-	Cover   string   `json:"cover,omitempty"`
-	Author  string   `json:"author,omitempty"`
+	ID        int64    `json:"id"`
+	Title     string   `json:"title"`
+	Summary   string   `json:"summary"`
+	Date      string   `json:"date"`
+	Tags      []string `json:"tags"`
+	Cover     string   `json:"cover,omitempty"`
+	Author    string   `json:"author,omitempty"`
+	CreatedAt int64    `json:"created_at"` // first published to DB (unix seconds)
+	UpdatedAt int64    `json:"updated_at"` // last metadata update (unix seconds)
 }
 
 // BlogDetail is the full projection returned by detail queries.
@@ -98,12 +100,14 @@ func ToBlogItem(b *schema.Blog) BlogItem {
 		tagNames = append(tagNames, t.Name)
 	}
 	return BlogItem{
-		ID:      b.ID,
-		Title:   b.Title,
-		Summary: b.Summary,
-		Date:    b.Date,
-		Tags:    tagNames,
-		Cover:   b.Cover,
-		Author:  b.Author,
+		ID:        b.ID,
+		Title:     b.Title,
+		Summary:   b.Summary,
+		Date:      b.Date,
+		Tags:      tagNames,
+		Cover:     b.Cover,
+		Author:    b.Author,
+		CreatedAt: b.CreatedAt,
+		UpdatedAt: b.UpdatedAt,
 	}
 }
