@@ -13,6 +13,7 @@ type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
 	Database DatabaseConfig `mapstructure:"database"`
 	Content  ContentConfig  `mapstructure:"content"`
+	Auth     AuthConfig     `mapstructure:"auth"`
 	App      AppConfig      `mapstructure:"app"`
 }
 
@@ -20,6 +21,20 @@ type Config struct {
 type ServerConfig struct {
 	Host string `mapstructure:"host"`
 	Port int    `mapstructure:"port"`
+	// AllowedOrigins lists the browser origins permitted to call the API
+	// cross-origin. Both frontends talk to the backend server-side, so the
+	// normal value is empty: no origin gets CORS access.
+	AllowedOrigins []string `mapstructure:"allowed_origins"`
+}
+
+// AuthConfig holds credentials for the write API.
+type AuthConfig struct {
+	// AdminToken is the shared secret blog-manager presents as
+	// "Authorization: Bearer <token>" on every write request. An empty value
+	// disables the write endpoints instead of leaving them open.
+	//
+	// Never commit a production value — set BLOG_AUTH_ADMIN_TOKEN instead.
+	AdminToken string `mapstructure:"admin_token"`
 }
 
 // DatabaseConfig holds database connection settings.
@@ -56,6 +71,13 @@ func Load(configFile string) (*Config, error) {
 	v.SetEnvPrefix("BLOG")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	// Bind the admin token explicitly. AutomaticEnv alone does not reliably
+	// surface a key during Unmarshal when the config file omits it, which is
+	// exactly the production case: the file is empty and the env supplies it.
+	if err := v.BindEnv("auth.admin_token", "BLOG_AUTH_ADMIN_TOKEN"); err != nil {
+		return nil, fmt.Errorf("failed to bind auth.admin_token: %w", err)
+	}
+
 	setDefaults(v)
 
 	if err := v.ReadInConfig(); err != nil {
@@ -78,6 +100,9 @@ func Load(configFile string) (*Config, error) {
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.host", "0.0.0.0")
 	v.SetDefault("server.port", 8080)
+	v.SetDefault("server.allowed_origins", []string{})
+
+	v.SetDefault("auth.admin_token", "")
 
 	v.SetDefault("database.driver", "sqlite")
 	v.SetDefault("database.dsn", "blog.db")

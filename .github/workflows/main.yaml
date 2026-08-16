@@ -62,11 +62,15 @@ jobs:
 
       - name: Remote Deploy
         uses: appleboy/ssh-action@v0.1.10
+        env:
+          # Shared secret for the write API. If this repo secret is unset the
+          # backend starts with writes disabled — reads keep working.
+          BLOG_AUTH_ADMIN_TOKEN: ${{ secrets.BLOG_AUTH_ADMIN_TOKEN }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: APP_NAME
+          envs: APP_NAME,BLOG_AUTH_ADMIN_TOKEN
           script: |
             set -euo pipefail
             DEPLOY_DIR="${{ env.DEPLOY_DIR }}"
@@ -84,14 +88,18 @@ jobs:
 
             # 3. PM2 启动/重启
             cd "$DEPLOY_DIR/current"
+            # --update-env so the admin token from CI reaches the process;
+            # without it pm2 would keep the env captured at first start.
+            export BLOG_AUTH_ADMIN_TOKEN
             if pm2 describe "$FINAL_APP_NAME" > /dev/null; then
               echo "✅ 正在平滑重启生产环境进程..."
-              pm2 reload "$FINAL_APP_NAME"
+              pm2 reload "$FINAL_APP_NAME" --update-env
             else
               echo "🚀 正在启动生产环境进程..."
               pm2 start ./server \
                 --name "$FINAL_APP_NAME" \
                 --cwd "$DEPLOY_DIR/current" \
+                --update-env \
                 -- \
                 serve --config ./configs/config.yaml
             fi

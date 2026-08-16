@@ -1,6 +1,13 @@
 server:
   host: "0.0.0.0"
   port: 8080
+  allowed_origins: []
+
+auth:
+  # Deliberately empty: the real token comes from BLOG_AUTH_ADMIN_TOKEN in the
+  # environment. If it is unset the write endpoints refuse every request, which
+  # leaves the site readable rather than writable by anyone.
+  admin_token: ""
 
 database:
   driver: "sqlite"
