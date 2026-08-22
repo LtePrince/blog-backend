@@ -12,6 +12,7 @@ import (
 	"blog-backend/internal/column/schema"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // relImageRe matches Markdown image references with relative paths like
@@ -210,6 +211,15 @@ func (r *columnRepository) GetChapter(ctx context.Context, columnSlug, chapterSl
 	return view, nil
 }
 
+// CreateColumn inserts a column, or updates the existing one when a column
+// with the same slug is already stored.
+//
+// Publishing is a check-then-act sequence on the client: it lists columns,
+// finds no match, then creates. Two overlapping publishes both see "no match"
+// and both create, and the second used to fail on the slug unique index even
+// though its intent — make the remote match the local content — was perfectly
+// satisfiable. Upserting lets repeated and concurrent publishes converge on
+// the same state instead of erroring.
 func (r *columnRepository) CreateColumn(
 	ctx context.Context,
 	col *schema.Column,
@@ -217,19 +227,54 @@ func (r *columnRepository) CreateColumn(
 	chapters []schema.Chapter,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Upsert the row by itself. Associations are replaced further down, so
+		// that a conflicting insert cannot duplicate chapters or tag links.
+		parent := *col
+		parent.Tags = nil
+		parent.Chapters = nil
+
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "slug"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"title", "summary", "author", "path", "updated_at",
+			}),
+		}).Create(&parent).Error; err != nil {
+			return fmt.Errorf("create column: %w", err)
+		}
+
+		// Re-read rather than trusting parent.ID: on the conflict path the
+		// insert does not reliably return the existing row's id.
+		var stored schema.Column
+		if err := tx.Where("slug = ?", col.Slug).First(&stored).Error; err != nil {
+			return fmt.Errorf("reload column %q: %w", col.Slug, err)
+		}
+		col.ID = stored.ID
+
 		txRepo := &columnRepository{db: tx, repoDir: r.repoDir}
 		tags, err := txRepo.findOrCreateTags(ctx, tagNames)
 		if err != nil {
 			return err
 		}
-		col.Tags = tags
-		normalizeChapterSort(chapters)
-		col.Chapters = chapters
-
-		if err := tx.Create(col).Error; err != nil {
-			return fmt.Errorf("create column: %w", err)
+		if err := tx.Model(&stored).Association("Tags").Replace(tags); err != nil {
+			return fmt.Errorf("replace tags for column %q: %w", col.Slug, err)
 		}
-		return nil
+
+		// Replace the whole chapter set, matching UpdateColumn's semantics.
+		if err := tx.Where("column_id = ?", stored.ID).Delete(&schema.Chapter{}).Error; err != nil {
+			return fmt.Errorf("clear chapters for column %q: %w", col.Slug, err)
+		}
+		normalizeChapterSort(chapters)
+		for i := range chapters {
+			chapters[i].ID = 0
+			chapters[i].ColumnID = stored.ID
+		}
+		if len(chapters) > 0 {
+			if err := tx.Create(&chapters).Error; err != nil {
+				return fmt.Errorf("create chapters for column %q: %w", col.Slug, err)
+			}
+		}
+
+		return cleanupOrphanTags(tx)
 	})
 }
 
