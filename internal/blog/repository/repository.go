@@ -122,7 +122,8 @@ func (r *blogRepository) findOrCreateTags(ctx context.Context, names []string) (
 // ──────────────────────────────────────────────
 
 // Older rows may only have an authored date. Apply the same fallback before pagination.
-const recentOrder = "COALESCE(NULLIF(blogs.updated_at,0), NULLIF(blogs.created_at,0), unixepoch(blogs.date), 0) DESC, blogs.id DESC"
+const effectivePostTime = "COALESCE(NULLIF(blogs.updated_at,0), NULLIF(blogs.created_at,0), unixepoch(blogs.date), 0)"
+const recentOrder = effectivePostTime + " DESC, blogs.id DESC"
 
 // applySearchParams returns a GORM scope that applies filter & order options.
 func applySearchParams(params []SearchParam) func(*gorm.DB) *gorm.DB {
@@ -344,20 +345,16 @@ func (r *blogRepository) ListTags(ctx context.Context) ([]TagItem, error) {
 
 // GetStats returns aggregate site statistics.
 func (r *blogRepository) GetStats(ctx context.Context) (*SiteStats, error) {
-	var postCount int64
-	if err := r.db.WithContext(ctx).Model(&schema.Blog{}).Count(&postCount).Error; err != nil {
-		return nil, fmt.Errorf("count posts: %w", err)
+	// Both aggregates return a row even when their table is empty.
+	const query = `SELECT post_count, column_count, (SELECT COUNT(*) FROM tags) AS tag_count,
+		MAX(COALESCE(latest_post, 0), COALESCE(latest_column, 0)) AS last_updated_at
+		FROM (SELECT COUNT(*) AS post_count, MAX(` + effectivePostTime + `) AS latest_post FROM blogs)
+		CROSS JOIN (SELECT COUNT(*) AS column_count, MAX(updated_at) AS latest_column FROM columns)`
+	var stats SiteStats
+	if err := r.db.WithContext(ctx).Raw(query).Scan(&stats).Error; err != nil {
+		return nil, fmt.Errorf("get site stats: %w", err)
 	}
-
-	var tagCount int64
-	if err := r.db.WithContext(ctx).Model(&schema.Tag{}).Count(&tagCount).Error; err != nil {
-		return nil, fmt.Errorf("count tags: %w", err)
-	}
-
-	return &SiteStats{
-		PostCount: postCount,
-		TagCount:  tagCount,
-	}, nil
+	return &stats, nil
 }
 
 func (r *blogRepository) SeedContentHashes(ctx context.Context) error {

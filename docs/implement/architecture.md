@@ -22,6 +22,8 @@
 | 单章 | `GET /columns/:slug/chapters/:chapter` | 在同一路径使用 PUT 发布、DELETE 移除 |
 | 动态和统计 | `GET /moments`、`/stats`、`/system/stats` | 只读 |
 
+`GET /api/v1/stats` 返回 `post_count`、`column_count`、`tag_count` 和 `last_updated_at`。一次只读查询汇总全库，取博客有效时间与专栏 `updated_at` 的最大值，单位为 Unix 秒。旧博客沿用列表排序的创建时间、文章日期回退规则；无有效时间返回 0。
+
 列表接受 `page_no`、`page_size`、`filter_title`、`filter_tag` 等参数，响应含 `total` 与 `item_list`。单章 PUT 传 `file`、`title`、`content_hash` 和 `following`（本地目录中排在该章之后的 slug）。服务层核对从文件名派生的 slug；仓储层在同一事务中读服务器正文、校验哈希、定位章节顺序、保存快照并重算专栏时间。校验失败会回滚。专栏 PUT 仍支持显式提交整份章节列表；仅更新专栏信息时应省略 `chapters`。[请求类型](../../internal/column/service/columns.go) · [单章事务](../../internal/column/repository/chapter.go)
 
 ## 存储与升级

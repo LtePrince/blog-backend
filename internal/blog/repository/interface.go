@@ -27,7 +27,7 @@ type IBlogRepository interface {
 	// ListTags returns all tags with their associated post counts.
 	ListTags(ctx context.Context) ([]TagItem, error)
 
-	// GetStats returns site-wide statistics (total posts, total unique tags).
+	// GetStats returns published content counts, the tag count and the latest update.
 	GetStats(ctx context.Context) (*SiteStats, error)
 
 	SeedContentHashes(ctx context.Context) error
@@ -65,8 +65,10 @@ type Order struct {
 
 // SiteStats holds aggregate site statistics.
 type SiteStats struct {
-	PostCount int64 `json:"post_count"`
-	TagCount  int64 `json:"tag_count"`
+	PostCount     int64 `json:"post_count"`
+	ColumnCount   int64 `json:"column_count"`
+	TagCount      int64 `json:"tag_count"`
+	LastUpdatedAt int64 `json:"last_updated_at"` // Unix seconds, or zero for no dated content
 }
 
 // BlogItem is the summary projection returned by list queries.

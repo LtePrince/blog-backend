@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -182,6 +184,50 @@ func TestRecentPostsUseUpdatedBodyBeforeLimit(t *testing.T) {
 	if next[0].UpdatedAt != recent[0].UpdatedAt {
 		t.Fatalf("republish changed timestamp: %v", next)
 	}
+}
+
+func TestSiteStatsIncludesPublishedColumns(t *testing.T) {
+	s := newPublishedSite(t)
+	ctx := context.Background()
+	h := HttpServer{engine: gin.New(), blogService: blogservice.NewBlogService(s.blogs), columnService: columnservice.NewColumnService(s.columns)}
+	h.registerRoutes(&config.Config{})
+	check := func(posts, columns, tags, latest int64) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		h.engine.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/stats", nil))
+		var body struct {
+			Data map[string]int64 `json:"data"`
+		}
+		requireOK(t, json.Unmarshal(w.Body.Bytes(), &body))
+		want := map[string]int64{"post_count": posts, "column_count": columns, "tag_count": tags, "last_updated_at": latest}
+		if w.Code != http.StatusOK || !maps.Equal(body.Data, want) {
+			t.Fatalf("HTTP %d, stats %v; want %v", w.Code, body.Data, want)
+		}
+	}
+	check(0, 0, 0, 0)
+	s.put(t, "columns/book/a.md", "A")
+	s.put(t, "columns/book/b.md", "B")
+	col := series.Column{Slug: "book", Path: "columns/book", Title: "Book"}
+	chapters := []series.Chapter{{Slug: "a", File: "a.md", Title: "A"}, {Slug: "b", File: "b.md", Title: "B"}}
+	requireOK(t, s.columns.CreateColumn(ctx, &col, []string{"math"}, chapters))
+	first := s.chapters(t)[0].UpdatedAt
+	check(0, 1, 1, first)
+
+	requireOK(t, s.db.Exec("INSERT INTO blogs(title,path,date) VALUES ('Old', 'posts/legacy', '2000-01-01')").Error)
+	s.put(t, "columns/book/b.md", "updated B")
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte("updated B")))
+	requireOK(t, s.columns.PublishChapter(ctx, col.Slug, chapters[1], hash, nil))
+	latest := s.chapters(t)[1].UpdatedAt
+	if latest <= first {
+		t.Fatal("chapter update did not advance the timestamp")
+	}
+	check(1, 1, 1, latest)
+
+	requireOK(t, s.db.Exec("UPDATE blogs SET updated_at = ?", latest+1).Error)
+	check(1, 1, 1, latest+1)
+	requireOK(t, s.db.Exec("UPDATE blogs SET updated_at = NULL").Error)
+	requireOK(t, s.columns.DeleteColumn(ctx, col.Slug))
+	check(1, 0, 0, 946684800) // Legacy post with only its authored date.
 }
 
 func TestStaticFilesFollowPublication(t *testing.T) {
