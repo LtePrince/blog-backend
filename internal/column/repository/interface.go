@@ -25,11 +25,17 @@ type IColumnRepository interface {
 	// UpdateColumn replaces an existing column's metadata, tags and chapters.
 	UpdateColumn(ctx context.Context, slug string, updates map[string]interface{}, tagNames *[]string, chapters *[]schema.Chapter) error
 
+	PublishChapter(ctx context.Context, slug string, chapter schema.Chapter, expectedHash string, following []string) error
+	WithdrawChapter(ctx context.Context, slug, chapterSlug string) error
+
 	// DeleteColumn removes a column, its chapters and tag associations.
 	DeleteColumn(ctx context.Context, slug string) error
 
 	// ListTags returns all column tags with their associated column counts.
 	ListTags(ctx context.Context) ([]TagItem, error)
+
+	SeedPublishedChapters(ctx context.Context) error
+	HasImage(ctx context.Context, dir, asset string) (bool, error)
 
 	// AutoMigrate ensures the column tables exist.
 	AutoMigrate() error
@@ -75,9 +81,12 @@ type ColumnItem struct {
 
 // ChapterItem is a chapter entry in a column's table of contents.
 type ChapterItem struct {
-	Slug  string `json:"slug"`
-	Title string `json:"title"`
-	Sort  int    `json:"sort"`
+	File        string `json:"file"`
+	ContentHash string `json:"content_hash"`
+	UpdatedAt   int64  `json:"updated_at"`
+	Slug        string `json:"slug"`
+	Title       string `json:"title"`
+	Sort        int    `json:"sort"`
 }
 
 // ColumnDetail is a column with its ordered chapter list (no bodies).

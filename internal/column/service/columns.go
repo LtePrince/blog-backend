@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -272,4 +273,37 @@ func (s *ColumnService) ListTags(
 		return nil, err
 	}
 	return &ListTagsResponse{Items: items}, nil
+}
+
+// HasImage checks whether published content references the requested asset.
+func (s *ColumnService) HasImage(ctx context.Context, dir, asset string) (bool, error) {
+	return s.repo.HasImage(ctx, dir, asset)
+}
+
+type PublishChapterRequest struct {
+	Slug        string   `uri:"slug"`
+	Chapter     string   `uri:"chapter"`
+	File        string   `json:"file"`
+	Title       string   `json:"title"`
+	ContentHash string   `json:"content_hash"`
+	Following   []string `json:"following"`
+}
+
+func (s *ColumnService) PublishChapter(ctx context.Context, req *PublishChapterRequest) (*UpdateColumnResponse, error) {
+	file, title := strings.TrimSpace(req.File), strings.TrimSpace(req.Title)
+	if req.Chapter == "" || deriveChapterSlug(file) != req.Chapter || title == "" || len(req.ContentHash) != 64 {
+		return nil, fmt.Errorf("invalid chapter or missing content hash")
+	}
+	ch := schema.Chapter{Slug: req.Chapter, File: file, Title: title}
+	if err := s.repo.PublishChapter(ctx, req.Slug, ch, req.ContentHash, req.Following); err != nil {
+		return nil, err
+	}
+	return &UpdateColumnResponse{}, nil
+}
+
+func (s *ColumnService) WithdrawChapter(ctx context.Context, req *GetChapterRequest) (*UpdateColumnResponse, error) {
+	if err := s.repo.WithdrawChapter(ctx, req.Slug, req.Chapter); err != nil {
+		return nil, err
+	}
+	return &UpdateColumnResponse{}, nil
 }

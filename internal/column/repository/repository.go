@@ -2,22 +2,19 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
+
 	"strings"
+	"time"
 
 	blogschema "blog-backend/internal/blog/schema"
 	"blog-backend/internal/column/schema"
+	"blog-backend/internal/content"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
-
-// relImageRe matches Markdown image references with relative paths like
-// ![alt](./foo.jpg) — same rewrite rule as the blog repository.
-var relImageRe = regexp.MustCompile(`(!\[[^\]]*\])\(\./([^)]+)\)`)
 
 // columnRepository is the GORM-backed implementation of IColumnRepository.
 type columnRepository struct {
@@ -122,7 +119,7 @@ func (r *columnRepository) ListColumns(
 	var cols []schema.Column
 	if err := r.db.WithContext(ctx).
 		Preload("Tags").
-		Preload("Chapters").
+		Preload("Chapters", func(db *gorm.DB) *gorm.DB { return db.Select("id", "column_id") }).
 		Scopes(scope).
 		Limit(limit).Offset(offset).
 		Find(&cols).Error; err != nil {
@@ -140,7 +137,7 @@ func (r *columnRepository) loadColumn(ctx context.Context, slug string) (*schema
 	var col schema.Column
 	if err := r.db.WithContext(ctx).
 		Preload("Tags").
-		Preload("Chapters", func(db *gorm.DB) *gorm.DB { return db.Order("sort ASC") }).
+		Preload("Chapters", func(db *gorm.DB) *gorm.DB { return db.Omit("published_markdown").Order("sort ASC, id ASC") }).
 		Where("slug = ?", slug).
 		First(&col).Error; err != nil {
 		return nil, fmt.Errorf("get column %q: %w", slug, err)
@@ -151,7 +148,7 @@ func (r *columnRepository) loadColumn(ctx context.Context, slug string) (*schema
 func toChapterItems(chs []schema.Chapter) []ChapterItem {
 	items := make([]ChapterItem, 0, len(chs))
 	for _, c := range chs {
-		items = append(items, ChapterItem{Slug: c.Slug, Title: c.Title, Sort: c.Sort})
+		items = append(items, ChapterItem{File: c.File, ContentHash: c.ContentHash, Slug: c.Slug, Title: c.Title, Sort: c.Sort, UpdatedAt: c.UpdatedAt})
 	}
 	return items
 }
@@ -186,20 +183,19 @@ func (r *columnRepository) GetChapter(ctx context.Context, columnSlug, chapterSl
 	}
 	current := col.Chapters[idx]
 
-	mdPath := filepath.Join(r.repoDir, col.Path, current.File)
-	raw, err := os.ReadFile(mdPath)
-	if err != nil {
-		return nil, fmt.Errorf("read chapter markdown %s: %w", mdPath, err)
+	var published schema.Chapter
+	if err := r.db.WithContext(ctx).Select("slug", "title", "published_markdown").Where("published_markdown IS NOT NULL").First(&published, current.ID).Error; err != nil {
+		return nil, err
 	}
-	content := relImageRe.ReplaceAllString(string(raw), "${1}(/static/"+col.Path+"/${2})")
+	body := content.RenderBody([]byte(published.PublishedMarkdown), col.Path)
 
 	view := &ChapterView{
 		Column:   ToColumnItem(col),
 		Chapters: toChapterItems(col.Chapters),
 		Current: ChapterContent{
-			Slug:    current.Slug,
-			Title:   current.Title,
-			Content: content,
+			Slug:    published.Slug,
+			Title:   published.Title,
+			Content: body,
 		},
 	}
 	if idx > 0 {
@@ -236,7 +232,7 @@ func (r *columnRepository) CreateColumn(
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "slug"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"title", "summary", "author", "path", "updated_at",
+				"title", "summary", "author", "path",
 			}),
 		}).Create(&parent).Error; err != nil {
 			return fmt.Errorf("create column: %w", err)
@@ -259,19 +255,8 @@ func (r *columnRepository) CreateColumn(
 			return fmt.Errorf("replace tags for column %q: %w", col.Slug, err)
 		}
 
-		// Replace the whole chapter set, matching UpdateColumn's semantics.
-		if err := tx.Where("column_id = ?", stored.ID).Delete(&schema.Chapter{}).Error; err != nil {
-			return fmt.Errorf("clear chapters for column %q: %w", col.Slug, err)
-		}
-		normalizeChapterSort(chapters)
-		for i := range chapters {
-			chapters[i].ID = 0
-			chapters[i].ColumnID = stored.ID
-		}
-		if len(chapters) > 0 {
-			if err := tx.Create(&chapters).Error; err != nil {
-				return fmt.Errorf("create chapters for column %q: %w", col.Slug, err)
-			}
+		if err := r.reconcileChapters(tx, &stored, chapters); err != nil {
+			return err
 		}
 
 		return cleanupOrphanTags(tx)
@@ -308,21 +293,12 @@ func (r *columnRepository) UpdateColumn(
 			}
 		}
 
+		if dir, ok := updates["path"].(string); ok {
+			col.Path = dir
+		}
 		if chapters != nil {
-			// Replace the whole chapter set.
-			if err := tx.Where("column_id = ?", col.ID).Delete(&schema.Chapter{}).Error; err != nil {
-				return fmt.Errorf("clear chapters for column %q: %w", slug, err)
-			}
-			newChapters := *chapters
-			normalizeChapterSort(newChapters)
-			for i := range newChapters {
-				newChapters[i].ID = 0
-				newChapters[i].ColumnID = col.ID
-			}
-			if len(newChapters) > 0 {
-				if err := tx.Create(&newChapters).Error; err != nil {
-					return fmt.Errorf("recreate chapters for column %q: %w", slug, err)
-				}
+			if err := r.reconcileChapters(tx, &col, *chapters); err != nil {
+				return err
 			}
 		}
 
@@ -370,10 +346,119 @@ func (r *columnRepository) ListTags(ctx context.Context) ([]TagItem, error) {
 	return items, nil
 }
 
-// normalizeChapterSort assigns an ascending Sort based on slice order so the
-// meta.yaml chapter order stays authoritative.
-func normalizeChapterSort(chapters []schema.Chapter) {
-	for i := range chapters {
-		chapters[i].Sort = i
+// Match chapters by URL slug so metadata edits and reordering preserve their identity.
+func (r *columnRepository) reconcileChapters(tx *gorm.DB, col *schema.Column, desired []schema.Chapter) error {
+	var old []schema.Chapter
+	if err := tx.Where("column_id = ?", col.ID).Find(&old).Error; err != nil {
+		return err
 	}
+	bySlug := make(map[string]schema.Chapter, len(old))
+	for _, ch := range old {
+		bySlug[ch.Slug] = ch
+	}
+	seen := map[string]bool{}
+	latest := int64(0)
+	revisionTime := max(time.Now().Unix(), col.UpdatedAt+1)
+	for i, ch := range desired {
+		if ch.Slug == "" || seen[ch.Slug] {
+			return fmt.Errorf("empty or duplicate chapter slug %q", ch.Slug)
+		}
+		seen[ch.Slug] = true
+		prev, exists := bySlug[ch.Slug]
+		ch.ID = prev.ID
+		ch.CreatedAt = prev.CreatedAt
+		ch.UpdatedAt = prev.UpdatedAt
+		ch.ContentHash = prev.ContentHash
+		ch.ColumnID = col.ID
+		ch.Sort = i
+		if err := r.checkBody(col.Path, &ch, revisionTime); err != nil {
+			return err
+		}
+		if !exists || ch != prev {
+			if err := tx.Save(&ch).Error; err != nil {
+				return err
+			}
+		}
+		latest = max(latest, ch.UpdatedAt)
+	}
+	for _, ch := range old {
+		if !seen[ch.Slug] {
+			if err := tx.Delete(&ch).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Model(col).UpdateColumn("updated_at", latest).Error
+}
+
+func (r *columnRepository) checkBody(dir string, ch *schema.Chapter, revisionTime int64) error {
+	raw, err := content.ReadBody(r.repoDir, "columns", dir, ch.File)
+	if err != nil {
+		return err
+	}
+	ch.PublishedMarkdown = string(raw)
+	hash := content.Hash(raw)
+	if hash != ch.ContentHash {
+		// Seed existing rows without dating the whole archive to migration day.
+		if ch.ID == 0 || ch.ContentHash != "" {
+			ch.UpdatedAt = max(revisionTime, ch.UpdatedAt+1)
+		}
+		ch.ContentHash = hash
+	}
+	return nil
+}
+
+// Seed snapshots for legacy rows from the version the old reader was serving.
+// Subsequent pushes cannot replace a published snapshot.
+func (r *columnRepository) SeedPublishedChapters(ctx context.Context) error {
+	db := r.db.WithContext(ctx)
+	var ids []int64
+	if err := db.Model(&schema.Chapter{}).Where("published_markdown IS NULL").Pluck("id", &ids).Error; err != nil {
+		return err
+	}
+	var failures []error
+	for _, id := range ids {
+		err := db.Transaction(func(tx *gorm.DB) error {
+			var ch schema.Chapter
+			if err := tx.Where("published_markdown IS NULL").First(&ch, id).Error; err != nil {
+				return err
+			}
+			var col schema.Column
+			if err := tx.First(&col, ch.ColumnID).Error; err != nil {
+				return err
+			}
+			// The old reader served these bytes directly from disk. Preserve its timestamp at migration.
+			raw, err := content.ReadBody(r.repoDir, "columns", col.Path, ch.File)
+			if err != nil {
+				return err
+			}
+			ch.PublishedMarkdown = string(raw)
+			ch.ContentHash = content.Hash(raw)
+			if err := tx.Save(&ch).Error; err != nil {
+				return err
+			}
+			return setLatestChapterTime(tx, col.ID)
+		})
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func (r *columnRepository) HasImage(ctx context.Context, dir, asset string) (bool, error) {
+	var bodies []string
+	err := r.db.WithContext(ctx).Table("column_chapters").
+		Joins("JOIN columns ON columns.id = column_chapters.column_id").
+		Where("columns.path IN ? AND published_markdown IS NOT NULL", content.StoredPaths(dir)).
+		Pluck("published_markdown", &bodies).Error
+	if err != nil {
+		return false, err
+	}
+	for _, body := range bodies {
+		if content.ReferencesImage([]byte(body), dir, asset) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

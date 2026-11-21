@@ -2,21 +2,18 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
-	"regexp"
+	"maps"
 	"strings"
+	"time"
 
 	"blog-backend/internal/blog/schema"
+	"blog-backend/internal/content"
 
 	"gorm.io/gorm"
 )
-
-// relImageRe matches Markdown image references with relative paths like
-// ![alt](./foo.jpg) or ![](./sub/bar.png)
-var relImageRe = regexp.MustCompile(`(!\[[^\]]*\])\(\./([^)]+)\)`)
 
 // blogRepository is the concrete GORM-backed implementation of IBlogRepository.
 type blogRepository struct {
@@ -124,11 +121,14 @@ func (r *blogRepository) findOrCreateTags(ctx context.Context, names []string) (
 //  Query scoping
 // ──────────────────────────────────────────────
 
+// Older rows may only have an authored date. Apply the same fallback before pagination.
+const recentOrder = "COALESCE(NULLIF(blogs.updated_at,0), NULLIF(blogs.created_at,0), unixepoch(blogs.date), 0) DESC, blogs.id DESC"
+
 // applySearchParams returns a GORM scope that applies filter & order options.
 func applySearchParams(params []SearchParam) func(*gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		if len(params) == 0 {
-			return db.Order("date DESC")
+			return db.Order(recentOrder)
 		}
 		p := params[0]
 		if p.Filter != nil {
@@ -149,7 +149,7 @@ func applySearchParams(params []SearchParam) func(*gorm.DB) *gorm.DB {
 			}
 			db = db.Order(fmt.Sprintf("%s %s", p.Order.Field, dir))
 		} else {
-			db = db.Order("date DESC")
+			db = db.Order(recentOrder)
 		}
 		return db
 	}
@@ -196,34 +196,35 @@ func (r *blogRepository) GetBlogByID(ctx context.Context, id int64) (*BlogDetail
 	}
 
 	// Read Markdown from: repoDir / path / index.md
-	mdPath := filepath.Join(r.repoDir, blog.Path, "index.md")
-	raw, err := os.ReadFile(mdPath)
+	raw, err := content.ReadBody(r.repoDir, "posts", blog.Path, "index.md")
 	if err != nil {
-		return nil, fmt.Errorf("read markdown %s: %w", mdPath, err)
+		return nil, err
 	}
-
-	// Replace relative image paths (./xxx) with absolute paths (/static/{path}/xxx)
-	// so the browser can fetch images via the static file server.
-	content := relImageRe.ReplaceAllString(string(raw), "${1}(/static/"+blog.Path+"/${2})")
+	body := content.RenderBody(raw, blog.Path)
 
 	return &BlogDetail{
 		BlogItem: ToBlogItem(&blog),
-		Content:  content,
+		Content:  body,
 	}, nil
 }
 
 // CreateBlog inserts a new blog record and associates the given tags.
 func (r *blogRepository) CreateBlog(ctx context.Context, blog *schema.Blog, tagNames []string) error {
-	tags, err := r.findOrCreateTags(ctx, tagNames)
+	hash, err := content.BodyHash(r.repoDir, "posts", blog.Path, "index.md")
 	if err != nil {
 		return err
 	}
-	blog.Tags = tags
-
-	if err := r.db.WithContext(ctx).Create(blog).Error; err != nil {
-		return fmt.Errorf("create blog: %w", err)
-	}
-	return nil
+	blog.ContentHash = hash
+	blog.UpdatedAt = time.Now().Unix()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := &blogRepository{db: tx, repoDir: r.repoDir}
+		tags, err := txRepo.findOrCreateTags(ctx, tagNames)
+		if err != nil {
+			return err
+		}
+		blog.Tags = tags
+		return tx.Create(blog).Error
+	})
 }
 
 // UpdateBlog updates specific fields of an existing blog and optionally
@@ -235,31 +236,57 @@ func (r *blogRepository) UpdateBlog(
 	tagNames *[]string,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Update scalar fields.
-		if len(updates) > 0 {
-			result := tx.Model(&schema.Blog{}).Where("id = ?", id).Updates(updates)
-			if result.Error != nil {
-				return fmt.Errorf("update blog %d: %w", id, result.Error)
-			}
-			if result.RowsAffected == 0 {
-				return fmt.Errorf("blog %d not found", id)
+		var blog schema.Blog
+		if err := tx.Preload("Tags").First(&blog, id).Error; err != nil {
+			return err
+		}
+		dir := blog.Path
+		if next, ok := updates["path"].(string); ok {
+			dir = next
+		}
+		hash, err := content.BodyHash(r.repoDir, "posts", dir, "index.md")
+		if err != nil {
+			return err
+		}
+		current := map[string]string{"title": blog.Title, "date": blog.Date, "path": blog.Path, "summary": blog.Summary, "cover": blog.Cover, "author": blog.Author}
+		fields := map[string]any{}
+		for key, v := range updates {
+			if v != current[key] {
+				fields[key] = v
 			}
 		}
-
-		// Replace tag associations if requested.
+		changed := len(fields) > 0 || (blog.ContentHash != "" && hash != blog.ContentHash)
+		if hash != blog.ContentHash {
+			fields["content_hash"] = hash
+		}
 		if tagNames != nil {
 			txRepo := &blogRepository{db: tx, repoDir: r.repoDir}
 			tags, err := txRepo.findOrCreateTags(ctx, *tagNames)
 			if err != nil {
 				return err
 			}
-			var blog schema.Blog
-			blog.ID = id
-			if err := tx.Model(&blog).Association("Tags").Replace(tags); err != nil {
-				return fmt.Errorf("replace tags for blog %d: %w", id, err)
+			oldSet := map[int64]bool{}
+			newSet := map[int64]bool{}
+			for _, t := range blog.Tags {
+				oldSet[t.ID] = true
+			}
+			for _, t := range tags {
+				newSet[t.ID] = true
+			}
+			if !maps.Equal(oldSet, newSet) {
+				if err := tx.Model(&blog).Association("Tags").Replace(tags); err != nil {
+					return err
+				}
+				changed = true
 			}
 		}
-		return nil
+		if changed {
+			fields["updated_at"] = max(time.Now().Unix(), blog.UpdatedAt+1)
+		}
+		if len(fields) == 0 {
+			return nil
+		}
+		return tx.Model(&blog).UpdateColumns(fields).Error
 	})
 }
 
@@ -331,4 +358,44 @@ func (r *blogRepository) GetStats(ctx context.Context) (*SiteStats, error) {
 		PostCount: postCount,
 		TagCount:  tagCount,
 	}, nil
+}
+
+func (r *blogRepository) SeedContentHashes(ctx context.Context) error {
+	db := r.db.WithContext(ctx)
+	var blogs []schema.Blog
+	if err := db.Where("COALESCE(content_hash, '') = ''").Find(&blogs).Error; err != nil {
+		return err
+	}
+	var failures []error
+	for _, blog := range blogs {
+		hash, err := content.BodyHash(r.repoDir, "posts", blog.Path, "index.md")
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		err = db.Model(&blog).Where("path = ? AND COALESCE(content_hash, '') = ''", blog.Path).UpdateColumn("content_hash", hash).Error
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func (r *blogRepository) HasImage(ctx context.Context, dir, asset string) (bool, error) {
+	var blog schema.Blog
+	err := r.db.WithContext(ctx).Where("path IN ?", content.StoredPaths(dir)).Take(&blog).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if content.AssetRef(blog.Cover, dir) == asset {
+		return true, nil
+	}
+	raw, err := content.ReadBody(r.repoDir, "posts", blog.Path, "index.md")
+	if err != nil {
+		return false, err
+	}
+	return content.ReferencesImage(raw, dir, asset), nil
 }

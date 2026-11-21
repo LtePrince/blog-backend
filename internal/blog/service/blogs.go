@@ -28,7 +28,7 @@ type ListBlogsRequest struct {
 	PageSize    int    `form:"page_size"`
 	FilterTitle string `form:"filter_title"`
 	FilterTag   string `form:"filter_tag"`
-	OrderBy     string `form:"order_by" binding:"omitempty,oneof=date title created_at"`
+	OrderBy     string `form:"order_by" binding:"omitempty,oneof=date title created_at updated_at"`
 	Order       string `form:"order"    binding:"omitempty,oneof=asc desc"`
 }
 
@@ -316,4 +316,9 @@ func (s *BlogService) ListTags(
 		return nil, err
 	}
 	return &ListTagsResponse{Items: items}, nil
+}
+
+// HasImage checks whether published content references the requested asset.
+func (s *BlogService) HasImage(ctx context.Context, dir, asset string) (bool, error) {
+	return s.repo.HasImage(ctx, dir, asset)
 }

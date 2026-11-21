@@ -30,6 +30,9 @@ type IBlogRepository interface {
 	// GetStats returns site-wide statistics (total posts, total unique tags).
 	GetStats(ctx context.Context) (*SiteStats, error)
 
+	SeedContentHashes(ctx context.Context) error
+	HasImage(ctx context.Context, dir, asset string) (bool, error)
+
 	// AutoMigrate ensures the table schema is up-to-date.
 	AutoMigrate() error
 }

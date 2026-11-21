@@ -13,6 +13,7 @@ import (
 	columnrepo "blog-backend/internal/column/repository"
 	columnservice "blog-backend/internal/column/service"
 	"blog-backend/internal/config"
+	"blog-backend/internal/content"
 	momentsservice "blog-backend/internal/moments/service"
 	systemservice "blog-backend/internal/system/service"
 
@@ -47,6 +48,13 @@ func NewHttpServer(
 	}
 	if err := columnRepo.AutoMigrate(); err != nil {
 		log.Fatalf("column auto-migrate failed: %v", err)
+	}
+
+	if err := blogRepo.SeedContentHashes(context.Background()); err != nil {
+		log.Printf("seed legacy blog hashes: %v", err)
+	}
+	if err := columnRepo.SeedPublishedChapters(context.Background()); err != nil {
+		log.Printf("seed legacy chapter snapshots: %v", err)
 	}
 
 	if cfg.App.Environment == "prd" {
@@ -125,31 +133,50 @@ func corsMiddleware(allowed []string) gin.HandlerFunc {
 	}
 }
 
-// serveContent serves the blog content repo over /static, refusing any path
-// with a dot-prefixed segment. The repo root holds .git and .github, and a
-// plain file server would publish the entire repository history alongside the
-// post images it is meant to serve.
-func serveContent(root string) gin.HandlerFunc {
-	fs := http.StripPrefix("/static", http.FileServer(http.Dir(root)))
-
+// Only serve images referenced by a published post, cover, or chapter.
+func (h *HttpServer) serveContent(root string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if hasDotSegment(c.Param("filepath")) {
-			c.AbortWithStatus(http.StatusNotFound)
+		name := strings.TrimPrefix(c.Param("filepath"), "/")
+		parts := strings.Split(name, "/")
+		missing := func() { c.AbortWithStatus(http.StatusNotFound) }
+		if len(parts) < 3 || path.Clean(name) != name {
+			missing()
 			return
 		}
-		fs.ServeHTTP(c.Writer, c.Request)
-	}
-}
-
-// hasDotSegment reports whether any segment of p begins with a dot, which
-// covers both repository metadata (.git) and traversal attempts ("..").
-func hasDotSegment(p string) bool {
-	for _, seg := range strings.Split(path.Clean(p), "/") {
-		if seg != "." && strings.HasPrefix(seg, ".") {
-			return true
+		switch strings.ToLower(path.Ext(name)) {
+		case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".ico":
+		default:
+			missing()
+			return
 		}
+		dir := strings.Join(parts[:2], "/")
+		var allowed bool
+		var err error
+		switch parts[0] {
+		case "posts":
+			allowed, err = h.blogService.HasImage(c.Request.Context(), dir, name)
+		case "columns":
+			allowed, err = h.columnService.HasImage(c.Request.Context(), dir, name)
+		}
+		if err != nil || !allowed {
+			missing()
+			return
+		}
+		f, err := content.Open(root, name)
+		if err != nil {
+			missing()
+			return
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			missing()
+			return
+		}
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Cache-Control", "no-cache")
+		http.ServeContent(c.Writer, c.Request, info.Name(), info.ModTime(), f)
 	}
-	return false
 }
 
 // registerRoutes sets up all HTTP routes.
@@ -159,8 +186,8 @@ func (h *HttpServer) registerRoutes(cfg *config.Config) {
 	})
 
 	// Serve static assets from the blog content repo.
-	h.engine.GET("/static/*filepath", serveContent(cfg.Content.RepoDir))
-	h.engine.HEAD("/static/*filepath", serveContent(cfg.Content.RepoDir))
+	h.engine.GET("/static/*filepath", h.serveContent(cfg.Content.RepoDir))
+	h.engine.HEAD("/static/*filepath", h.serveContent(cfg.Content.RepoDir))
 
 	api := h.engine.Group("/api/v1")
 	{
@@ -208,6 +235,8 @@ func (h *HttpServer) registerRoutes(cfg *config.Config) {
 			admin := columns.Group("", requireAdmin)
 			admin.POST("", handleJSON(h.columnService.CreateColumn))
 			admin.PUT("/:slug", handleAll(h.columnService.UpdateColumn))
+			admin.PUT("/:slug/chapters/:chapter", handleAll(h.columnService.PublishChapter))
+			admin.DELETE("/:slug/chapters/:chapter", handleURI(h.columnService.WithdrawChapter))
 			admin.DELETE("/:slug", handleURI(h.columnService.DeleteColumn))
 		}
 	}

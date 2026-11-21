@@ -3,8 +3,8 @@ package schema
 import blogschema "blog-backend/internal/blog/schema"
 
 // Column represents a multi-chapter series ("专栏") in the columns table.
-// Like blogs, only metadata lives in the DB; chapter Markdown bodies are read
-// from the filesystem at request time using repo_dir + Path + Chapter.File.
+// Like blogs, only metadata lives in the DB; working Markdown lives in the content repository. Each chapter also retains
+// the version selected for publication.
 type Column struct {
 	ID      int64  `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
 	Slug    string `gorm:"type:varchar(200);uniqueIndex;not null;column:slug" json:"slug"` // URL slug, e.g. "zk-snark"
@@ -21,7 +21,7 @@ type Column struct {
 	Chapters []Chapter `gorm:"foreignKey:ColumnID;constraint:OnDelete:CASCADE" json:"chapters"`
 
 	CreatedAt int64 `gorm:"autoCreateTime;column:created_at" json:"created_at"`
-	UpdatedAt int64 `gorm:"autoUpdateTime;column:updated_at" json:"updated_at"`
+	UpdatedAt int64 `gorm:"autoUpdateTime:false;column:updated_at" json:"updated_at"`
 }
 
 func (*Column) TableName() string {
@@ -30,15 +30,17 @@ func (*Column) TableName() string {
 
 // Chapter is a single Markdown chapter within a column.
 type Chapter struct {
-	ID       int64  `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
-	ColumnID int64  `gorm:"index;not null;column:column_id" json:"column_id"`
-	Slug     string `gorm:"type:varchar(200);not null;column:slug" json:"slug"`  // URL slug within the column, e.g. "intro"
-	Title    string `gorm:"type:varchar(255);not null;column:title" json:"title"`
-	File     string `gorm:"type:varchar(300);not null;column:file" json:"file"` // markdown filename within the column dir
-	Sort     int    `gorm:"column:sort" json:"sort"`                            // display order (ascending)
+	PublishedMarkdown string `gorm:"type:text;column:published_markdown" json:"-"`
+	ContentHash       string `gorm:"column:content_hash" json:"-"`
+	ID                int64  `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	ColumnID          int64  `gorm:"index;not null;column:column_id" json:"column_id"`
+	Slug              string `gorm:"type:varchar(200);not null;column:slug" json:"slug"` // URL slug within the column, e.g. "intro"
+	Title             string `gorm:"type:varchar(255);not null;column:title" json:"title"`
+	File              string `gorm:"type:varchar(300);not null;column:file" json:"file"` // markdown filename within the column dir
+	Sort              int    `gorm:"column:sort" json:"sort"`                            // display order (ascending)
 
 	CreatedAt int64 `gorm:"autoCreateTime;column:created_at" json:"created_at"`
-	UpdatedAt int64 `gorm:"autoUpdateTime;column:updated_at" json:"updated_at"`
+	UpdatedAt int64 `gorm:"autoUpdateTime:false;column:updated_at" json:"updated_at"`
 }
 
 func (*Chapter) TableName() string {
